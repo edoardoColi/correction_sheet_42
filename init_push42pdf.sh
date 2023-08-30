@@ -3,15 +3,19 @@
 #
 #Requirements: bash
 #Tested with: GNU bash, version 4.4.20(1)-release (x86_64-pc-linux-gnu)
+#Tested with: curl, version 7.58.0 (x86_64-pc-linux-gnu) Release-Date: 2018-01-24
+#Tested with: jq-1.5-1-a5b5cbe
 
 #Directory in executing path
 _PATH_DIR="/home/eddy/.local/bin/"
 #Reference strings
-export _GITHUB_USERNAME="edoardocoli"		#'export' let the variable be accessible by child processes
+export _GITHUB_USERNAME=""		#'export' let the variable be accessible by child processes
 export _GITHUB_ACCESS_TOKEN=""
-#Reference strings for fork request
+#Reference strings for github
 _ORIGINAL_OWNER="edoardocoli"
-_ORIGINAL_REPO="correction_sheet_42"
+_TARGET_REPO="correction_sheet_42"
+_REPO_URL="https://github.com/$_GITHUB_USERNAME/$_TARGET_REPO.git"
+_WEBPAGE_URL=$1
 #Colors
 RED="\e[1;31m"
 GREEN="\e[1;32m"
@@ -35,7 +39,7 @@ function usage()
 		echo -e "${RED}HOW TO OBTAIN A PERSONAL ACCESS TOKEN FROM GitHub:"
 		echo -e "${ORANGE}  Go to your GitHub >account >settings: https://github.com/settings/profile${DEFAULT}"
 		echo -e "${ORANGE}  Click on \"Developer settings\" in the left sidebar.${DEFAULT}"
-		echo -e "${ORANGE}  Under \"Personal access tokens\", click on \"Generate new token\".${DEFAULT}"
+		echo -e "${ORANGE}  Under \"Personal access tokens\", click \"Tokens(classic)\", then click on \"Generate new token (classic)\".${DEFAULT}"
 		echo -e "${ORANGE}  Give the token a name, select the scopes you need (at least repo), and click \"Generate token.\"${DEFAULT}"
 		echo -e "${ORANGE}  Save the generated token securely, as you won't be able to see it again.${DEFAULT}"
 		echo "More details about the characteristics of the token can be found here:"
@@ -48,7 +52,7 @@ function usage()
 ### init_procedure(program_name)
 init_procedure()
 {
-echo -e "${BLUE}Insert Github name:${DEFAULT}"
+echo -e "${BLUE}Insert Github name:${DEFAULT}(remember it's case sensitive)"
 while true; do
 	read -r gitname
 	if [ -z "$gitname" ]; then
@@ -135,37 +139,56 @@ exit 0;
 fi
 
 # se USER e _ORIGINAL_OWNER sono lo stesso niente fork ne pull, solo push
-# forked_repo_url="https://api.github.com/repos/$USER/$_ORIGINAL_REPO"
-# fork_url="https://api.github.com/repos/$_ORIGINAL_OWNER/$_ORIGINAL_REPO/forks"
+_FORKED_REPO_URL="https://api.github.com/repos/$_ORIGINAL_OWNER/$_TARGET_REPO"
+_FORKS_URL="https://api.github.com/repos/$_ORIGINAL_OWNER/$_TARGET_REPO/forks"
 
-# # Check if the repository is already forked
-# existing_fork=$(curl -s -H "Authorization: token $_GITHUB_ACCESS_TOKEN" "$forked_repo_url")
-# if [ "$existing_fork" = "Not Found" ]; then
-#   # Fork the repository
-#   response=$(curl -s -X POST -H "Authorization: token $_GITHUB_ACCESS_TOKEN" "$fork_url")
-#   echo "Forking repository..."
-#   # Extract the new repository URL from the response
-#   new_repo_url=$(echo "$response" | jq -r '.html_url')
-#   echo "Forked repository URL: $new_repo_url"
-# else
-#   echo "Repository is already forked. Cloning..."
-#   new_repo_url="https://github.com/$USER/$_ORIGINAL_REPO.git"
-# fi
+existing_repo=$(curl -s -H "Authorization: token $_GITHUB_ACCESS_TOKEN" "$_FORKED_REPO_URL")
+existing_forks=$(curl -s -H "Authorization: token $_GITHUB_ACCESS_TOKEN" "$_FORKS_URL")
+if echo "$existing_repo" | grep -q "\"$_GITHUB_USERNAME/$_TARGET_REPO\""; then		#check if the repository needs to be forked
+	echo "Repository is your own"
+else
+	if echo "$existing_forks" | grep -q "\"$_GITHUB_USERNAME/$_TARGET_REPO\""; then
+		echo "Repository has already been forked by you"
+	else
+		echo "Repository has not been forked by you yet"
+		# Fork the repository using the GitHub API
+		fork_response=$(curl -s -X POST -H "Authorization: token $_GITHUB_ACCESS_TOKEN" "$_FORKS_URL")
+		if echo "$fork_response" | grep -q "\"Bad credentials\""; then
+			echo You provide bad credentials, try reset your token.
+			exit 1;
+		fi
+		# _REPO_URL=$(echo "$fork_response" | jq -r '.clone_url')		#don't really need to use jq to figure out the new url if we know the correct github username
+	fi
+fi
+dir_name=forked_to_push_pdf
+git clone -q "$_REPO_URL" $dir_name
+cd $dir_name
 
-# # Clone the forked repository
-# git clone "$new_repo_url" forked_repo
-# cd forked_repo
+#create file pdf to push
 
-# # Create a new file called TEST.txt
-# echo "This is a test file." > TEST.txt
-# git add TEST.txt
-# git commit -m "Add pdf correction sheet by $NOME-42Roma"
-# git push origin master
+###TODO
+# output_file="output.pdf"
+# # Use PDFCrowd to convert the downloaded webpage to PDF
+# curl -s -F "src=file:$_WEBPAGE_URL" https://pdfcrowd.com/api/pdf/convert/html/ -o "$output_file"
+# echo "Webpage converted to PDF and saved as $output_file"
+echo "This is a test file for github api" > TEST1.txt
+git add TEST1.txt
+git commit -m "Add pdf correction sheet by $_GITHUB_USERNAME-42Roma"
+git push -q origin master
 
-# # Create the pull request
-# pr_url="https://api.github.com/repos/$_ORIGINAL_OWNER/$_ORIGINAL_REPO/pulls"
-# title="Pull Request for Adding TEST.txt"
-# body="This pull request adds a TEST.txt file to the repository."
+if echo "$existing_repo" | grep -q "\"$_GITHUB_USERNAME/$_TARGET_REPO\""; then		#check if the repository needs to be forked
+	echo -e "${ORANGE}(TODO)Pdf pushed in the repository!${DEFAULT}"
+else
+	#TODO
+	echo -e "${ORANGE}(TODO)Pull request done to the origin repository!${DEFAULT}"
+fi
+# cd ..
+# rm -fr $dir_name
+
+# Create the pull request
+# _PULL_REQ_URL="https://api.github.com/repos/$_ORIGINAL_OWNER/$_TARGET_REPO/pulls"
+# title="Pull Request for Adding TEST"
+# body="This pull request adds a TEST file to the repository."
 # base="main"
 # head="$USER:master"
 
@@ -174,23 +197,4 @@ fi
 #   \"body\": \"$body\",
 #   \"base\": \"$base\",
 #   \"head\": \"$head\"
-# }" "$pr_url"
-
-# echo "Pull request created!"
-
-
-## questo per creare il pdf della correzione
-# Replace <URL> with the webpage's URL you want to convert
-# webpage_url="https://www.example.com"
-# output_file="output.pdf"
-
-# # Step 1: Download the webpage using curl
-# curl -s "$webpage_url" > webpage.html
-
-# # Step 2: Use PDFCrowd to convert the downloaded webpage to PDF
-# curl -F "url=file:@webpage.html" https://pdfcrowd.com/url-to-pdf/ -o "$output_file"
-
-# # Step 3: Remove the temporary downloaded webpage file
-# rm webpage.html
-
-# echo "Webpage converted to PDF and saved as $output_file"
+# }" "$_PULL_REQ_URL"
